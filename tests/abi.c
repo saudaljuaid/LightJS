@@ -1,5 +1,18 @@
 #include "lightjs.h"
 #include <math.h>
+#include <string.h>
+
+static double number_from_bits(uint64_t bits) {
+    double number;
+    memcpy(&number, &bits, sizeof(number));
+    return number;
+}
+
+static uint64_t number_bits(double number) {
+    uint64_t bits;
+    memcpy(&bits, &number, sizeof(bits));
+    return bits;
+}
 
 #define CHECK(x) do { if (!(x)) return __LINE__; } while (0)
 int main(void) {
@@ -25,10 +38,35 @@ int main(void) {
     CHECK(lightjs_to_number(lightjs_number_multiply(0x1p-1074, 1.0)) == 0x1p-1074);
     CHECK(lightjs_to_number(lightjs_number_divide(0x1p-1022, 2.0)) == 0x1p-1023);
     CHECK(lightjs_to_number(lightjs_number_add(0x1p53, 1.0)) == 0x1p53);
-    uint64_t invalid = UINT64_MAX;
-    CHECK(lightjs_kind(invalid) == 0 && isnan(lightjs_to_number(invalid)));
-    CHECK(lightjs_to_boolean(invalid) == 0 && lightjs_to_int32(invalid) == 0);
-    CHECK(!lightjs_strict_equal(invalid, invalid) && !lightjs_same_value(invalid, invalid));
-    CHECK(!lightjs_same_value_zero(invalid, invalid));
+    const uint64_t nan_payloads[] = {
+        UINT64_C(0x7ff0000000000001), UINT64_C(0x7ff7ffffffffffff),
+        UINT64_C(0x7ff8000000000000), UINT64_C(0x7fffffffffffffff),
+        UINT64_C(0xfff0000000000001), UINT64_C(0xfff7ffffffffffff),
+        UINT64_C(0xfff8000000000000), UINT64_C(0xfff8000000000001),
+        UINT64_C(0xfff8000000000002), UINT64_C(0xfff8000000000003), UINT64_MAX,
+    };
+    for (size_t i = 0; i < sizeof(nan_payloads) / sizeof(nan_payloads[0]); i++) {
+        volatile double input = number_from_bits(nan_payloads[i]);
+        uint64_t value = lightjs_number(input);
+        CHECK(value == UINT64_C(0x7ff8000000000000));
+        CHECK(lightjs_kind(value) == LIGHTJS_NUMBER);
+        CHECK(number_bits(lightjs_to_number(value)) == UINT64_C(0x7ff8000000000000));
+    }
+    const uint64_t invalid_values[] = {
+        UINT64_C(0x7ff0000000000001), UINT64_C(0x7ff7ffffffffffff),
+        UINT64_C(0x7ff8000000000001), UINT64_C(0x7fffffffffffffff),
+        UINT64_C(0xfff0000000000001), UINT64_C(0xfff7ffffffffffff),
+        UINT64_C(0xfff8000000000004), UINT64_MAX,
+    };
+    for (size_t i = 0; i < sizeof(invalid_values) / sizeof(invalid_values[0]); i++) {
+        uint64_t invalid = invalid_values[i];
+        CHECK(lightjs_kind(invalid) == 0 && isnan(lightjs_to_number(invalid)));
+        CHECK(lightjs_to_boolean(invalid) == 0 && lightjs_to_int32(invalid) == 0);
+        CHECK(!lightjs_strict_equal(invalid, invalid) && !lightjs_same_value(invalid, invalid));
+        CHECK(!lightjs_same_value_zero(invalid, invalid));
+        CHECK(!lightjs_strict_equal(invalid, zero) && !lightjs_strict_equal(zero, invalid));
+        CHECK(!lightjs_same_value(invalid, nan) && !lightjs_same_value(nan, invalid));
+        CHECK(!lightjs_same_value_zero(invalid, nan) && !lightjs_same_value_zero(nan, invalid));
+    }
     return 0;
 }
