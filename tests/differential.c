@@ -17,7 +17,7 @@ static uint64_t bits(double n) {
 int main(void) {
     uint64_t input[2];
     size_t count;
-    while ((count = fread(input, sizeof(uint64_t), 2, stdin)) == 2) {
+    while ((count = fread(input, 1, sizeof(input), stdin)) == sizeof(input)) {
         const uint64_t a = input[0], b = input[1];
         const double x = number(a), y = number(b);
         const uint64_t output[] = {

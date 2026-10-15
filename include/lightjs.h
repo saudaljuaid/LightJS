@@ -6,6 +6,8 @@ extern "C" {
 #endif
 /* Value bits are opaque and process-local. Invalid inputs yield kind 0,
    NaN for to_number, and 0 for conversions and comparisons. */
+/* Requires binary64 doubles, round-to-nearest-even, gradual underflow,
+   and masked FP exceptions. Calls do not configure these modes. */
 enum lightjs_kind { LIGHTJS_NUMBER = 1, LIGHTJS_BOOLEAN, LIGHTJS_NULL, LIGHTJS_UNDEFINED };
 uint64_t lightjs_number(double n);
 uint64_t lightjs_boolean(uint32_t b);

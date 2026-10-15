@@ -12,15 +12,21 @@ assert(['Debug', 'ReleaseSafe', 'ReleaseFast', 'ReleaseSmall'].includes(mode));
 const zig = process.env.ZIG ?? 'zig';
 const dir = resolve('.zig-cache', 'differential', mode);
 mkdirSync(dir, { recursive: true });
-function run(command, args, options = {}) {
+function run(command, args, options = {}, expectedStatus = 0) {
   const result = spawnSync(command, args, { maxBuffer: 128 * 1024 * 1024, ...options });
   if (result.error) throw result.error;
-  assert.equal(result.status, 0, `${command} ${args.join(' ')}\n${result.stderr}`);
+  assert.equal(result.status, expectedStatus, `${command} ${args.join(' ')}\n${result.stderr}`);
   return result.stdout;
 }
 run(zig, ['build', `-Doptimize=${mode}`, '--prefix', dir]);
 run(zig, ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-O2',
   'tests/differential.c', `${dir}/lib/liblightjs.a`, '-Iinclude', '-o', `${dir}/native`]);
+// Reject incomplete binary records, including tails after a complete record.
+for (const completeBytes of [0, 16]) {
+  for (let tailBytes = 1; tailBytes < 16; ++tailBytes) {
+    run(`${dir}/native`, [], { input: Buffer.alloc(completeBytes + tailBytes) }, 1);
+  }
+}
 run(zig, ['build-exe', 'src/root.zig', '-target', 'wasm32-freestanding',
   '-fno-entry', '-rdynamic', '-O', mode, `-femit-bin=${dir}/core.wasm`]);
 const { instance: { exports: wasm } } = await WebAssembly.instantiate(readFileSync(`${dir}/core.wasm`));
