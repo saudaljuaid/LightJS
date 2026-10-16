@@ -37,6 +37,40 @@ With Node.js installed, compare native and WebAssembly primitive operations agai
 node tests/differential.mjs ReleaseFast
 ```
 
+## Numeric-expression subset
+
+The root Zig module exposes an allocation-free evaluator:
+
+```zig
+pub fn evalNumberExpression(source: []const u8) error{InvalidSyntax, LimitExceeded}!Value
+```
+
+It supports decimal numbers, unary `+`/`-`, binary `+`, `-`, `*`, `/`,
+parentheses, and space, tab, CR, and LF between tokens. Multiplication and
+division precede addition and subtraction; binary operators associate left.
+For example, `1 + 2 * 3` returns 7 and `(1 + 2) * 3` returns 9.
+
+```text
+exponent = [eE][+-]?[0-9]+
+number = (0|[1-9][0-9]*)(\.[0-9]*)? exponent? | \.[0-9]+ exponent?
+```
+
+The entire input must match this subset. Leading zeros (`01`, `00.5`),
+contiguous `++`, `--`, `**`, and all other syntax are rejected with
+`InvalidSyntax`; `1 + +2` and `1 - -2` are valid. IEEE binary64 rounding,
+signed zero, infinities, and subnormals are preserved; NaNs are canonicalized.
+Inputs over 4096 bytes or more than 64 combined pending parentheses and unary
+prefixes return `LimitExceeded` in every mode. Flat binary chains use loops.
+
+Compare native runtime source evaluation against Node/V8 in each build mode:
+
+```sh
+node tests/expression-differential.mjs ReleaseFast
+```
+
+This check uses seed `0x4c4a5331`, generates 10,000 distinct valid expressions,
+and reports total/distinct counts. Unsupported syntax is checked separately.
+
 ## Benchmarks
 
 Run the primitive-operation benchmarks on Linux:

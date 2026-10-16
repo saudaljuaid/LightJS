@@ -3,6 +3,10 @@ const Value = @import("lightjs").Value;
 const expect = std.testing.expect;
 const eq = std.testing.expectEqual;
 
+test {
+    _ = @import("expression.zig");
+}
+
 test "numbers retain every non-NaN bit and normalize all NaNs" {
     const edges = [_]u64{
         0,                     0x8000_0000_0000_0000, 1,                     0x8000_0000_0000_0001,

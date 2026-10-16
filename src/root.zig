@@ -1,5 +1,9 @@
 pub const Value = @import("value.zig").Value;
 
+pub fn evalNumberExpression(source: []const u8) error{ InvalidSyntax, LimitExceeded }!Value {
+    return @import("expression.zig").eval(source);
+}
+
 export fn lightjs_number(n: f64) u64 {
     return Value.number(n).bits;
 }
