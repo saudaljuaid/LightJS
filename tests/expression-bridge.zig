@@ -11,7 +11,7 @@ fn emit(bytes: []const u8) !void {
     for (bytes) |byte| if (putchar(byte) < 0) return error.Output;
 }
 
-pub fn main() !void {
+pub fn run(comptime evaluate: anytype) !void {
     var source: [4097]u8 = undefined;
     while (true) {
         const first = getchar();
@@ -32,7 +32,7 @@ pub fn main() !void {
             if (input < 0) return error.Truncated;
             byte.* = @intCast(input);
         }
-        const value = lightjs.evalNumberExpression(source[0..length]) catch |err| {
+        const value = evaluate(source[0..length]) catch |err| {
             try emit(@errorName(err));
             try emit("\n");
             continue;
@@ -45,4 +45,8 @@ pub fn main() !void {
         output[16] = '\n';
         try emit(&output);
     }
+}
+
+pub fn main() !void {
+    return run(lightjs.evalNumberExpression);
 }

@@ -71,6 +71,91 @@ node tests/expression-differential.mjs ReleaseFast
 This check uses seed `0x4c4a5331`, generates 10,000 distinct valid expressions,
 and reports total/distinct counts. Unsupported syntax is checked separately.
 
+## Numeric-comparison subset
+
+The root Zig module also exposes an allocation-free evaluator returning a
+canonical boolean `Value`:
+
+```zig
+pub fn evalNumberComparison(source: []const u8) error{InvalidSyntax, LimitExceeded}!Value
+```
+
+```text
+comparison = numeric_expression comparison_operator numeric_expression
+comparison_operator = "<" | "<=" | ">" | ">=" | "===" | "!=="
+numeric_expression = product (("+" | "-") product)*
+product = prefix (("*" | "/") prefix)*
+prefix = ("+" | "-") prefix | "(" numeric_expression ")" | number
+```
+
+`number` follows the decimal grammar above. Space, tab, CR, and LF may separate
+tokens; comparison operator characters must be contiguous. The existing
+rejection of contiguous `++`, `--`, and `**` applies. The entire input must
+contain exactly one comparison. Numeric parentheses are supported; comparison
+chains, comparisons inside parentheses, boolean operands, `==`, `!=`, assignment,
+logical operators, and all other syntax return `InvalidSyntax`.
+
+Examples: `1 + 2 < 4`, `(1 + 2) * 3 >= 9`, `(1 + 2) < (3 * 4)`,
+`-0 === 0`, and `0 / 0 !== 0 / 0` all return true. Ordered comparisons with
+NaN return false; strict equality equates signed zeros and never equates NaNs.
+Strict inequality negates strict equality. Numeric rounding, infinity,
+subnormal behavior, and the 4096-byte / 64-pending-level limits are unchanged.
+
+Run the native runtime-source comparison differential check in each build mode:
+
+```sh
+node tests/expression-differential.mjs ReleaseFast comparison
+```
+
+It uses seed `0x4c4a4331`, generates 10,000 distinct valid comparisons, reports
+generated/total/distinct counts, and checks unsupported syntax separately.
+
+## Numeric-program subset
+
+The root Zig module adds an allocation-free evaluator returning the final
+expression as a canonical Number `Value`:
+
+```zig
+pub fn evalNumberProgram(source: []const u8) error{InvalidSyntax, UnknownIdentifier, DuplicateBinding, LimitExceeded}!Value
+```
+
+```text
+program = (declaration | assignment)* numeric_expression ";"?
+declaration = "let" identifier "=" numeric_expression ";"
+assignment = identifier "=" numeric_expression ";"
+identifier = [A-Za-z_$][A-Za-z0-9_$]*
+```
+
+Numeric expressions reuse the arithmetic grammar above, with identifiers also
+accepted as prefix operands. Whitespace remains space, tab, CR, and LF. This is
+a bounded numeric-program subset with a required final expression. Declarations
+and assignments require semicolons; only whitespace may follow the final one.
+Bindings are case-sensitive and local to each call. Initializers run before
+installing bindings; reassignment may read the previous value. No names are
+predefined, including `NaN`, `Infinity`, and `undefined`.
+
+Reserved identifiers are `await break case catch class const continue debugger
+default delete do else enum export extends false finally for function if import
+in instanceof let new null return super switch this throw true try typeof var
+void while with yield implements interface package private protected public
+static eval arguments`. Unsupported syntax returns `InvalidSyntax`, unknown
+reads/assignment targets return `UnknownIdentifier`, and duplicate declarations
+return `DuplicateBinding`. Comparisons, boolean/string operands, other declaration
+forms, blocks, calls, functions, comments, and assignment expressions are excluded.
+
+Examples: `let x=2; let y=x*3; x=x+1; x+y` returns 9;
+`let price=12; let quantity=3; price=price+2; price*quantity;` returns 42;
+`let zero=-0; 1/zero` returns negative infinity. IEEE behavior is unchanged.
+The fixed table allows 64 bindings; reassignment uses no new slot. A 65th
+binding, input over 4096 bytes, or more than 64 combined pending unary/parenthesis
+levels returns `LimitExceeded`. Each initializer, RHS, and final expression starts
+at depth zero. Statements and flat arithmetic chains are processed iteratively.
+
+Run `node tests/expression-differential.mjs ReleaseFast program` in each mode.
+Seed `0x4c4a5031` generates 10,000 distinct programs, pairing statements and final
+expressions with an explicit strict Node/V8 return. Complete source reaches the
+compiled native evaluator at runtime; unsupported syntax/errors are checked separately.
+
 ## Benchmarks
 
 Run the primitive-operation benchmarks on Linux:

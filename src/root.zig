@@ -4,6 +4,14 @@ pub fn evalNumberExpression(source: []const u8) error{ InvalidSyntax, LimitExcee
     return @import("expression.zig").eval(source);
 }
 
+pub fn evalNumberComparison(source: []const u8) error{ InvalidSyntax, LimitExceeded }!Value {
+    return @import("expression.zig").evalComparison(source);
+}
+
+pub fn evalNumberProgram(source: []const u8) error{ InvalidSyntax, UnknownIdentifier, DuplicateBinding, LimitExceeded }!Value {
+    return @import("expression.zig").evalProgram(source);
+}
+
 export fn lightjs_number(n: f64) u64 {
     return Value.number(n).bits;
 }

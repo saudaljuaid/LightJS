@@ -1,23 +1,113 @@
 const std = @import("std");
 const Value = @import("value.zig").Value;
 const Error = error{ InvalidSyntax, LimitExceeded };
+const ParseError = Error || error{UnknownIdentifier};
 const max_depth = 64;
 
 pub fn eval(source: []const u8) Error!Value {
+    return evaluate(source, false);
+}
+
+pub fn evalComparison(source: []const u8) Error!Value {
+    return evaluate(source, true);
+}
+
+fn evaluate(source: []const u8, comptime comparison: bool) Error!Value {
+    try validate(source);
+    var parser = Parser{ .source = source };
+    const result = (if (comparison) parser.comparison() else parser.sum(0)) catch |err| switch (err) {
+        error.UnknownIdentifier => unreachable, // These APIs never enable name lookup.
+        else => |e| return e,
+    };
+    if (parser.peek() != null) return error.InvalidSyntax;
+    return result;
+}
+
+fn validate(source: []const u8) Error!void {
     if (source.len > 4096) return error.LimitExceeded;
     for (source, 0..) |c, i| {
         if (i + 1 < source.len and source[i + 1] == c and
             (c == '+' or c == '-' or c == '*')) return error.InvalidSyntax;
     }
-    var parser = Parser{ .source = source };
-    const result = try parser.sum(0);
-    if (parser.peek() != null) return error.InvalidSyntax;
-    return result;
+}
+
+pub fn evalProgram(source: []const u8) (ParseError || error{DuplicateBinding})!Value {
+    try validate(source);
+    var bindings = Bindings{};
+    var parser = Parser{ .source = source, .bindings = &bindings };
+    while (true) {
+        _ = parser.peek();
+        const start = parser.pos;
+        const token = parser.identifier();
+        const declaration = if (token) |name| std.mem.eql(u8, name, "let") else false;
+        if (declaration) _ = parser.peek();
+        const name = if (declaration) parser.identifier() else token;
+        _ = parser.peek();
+        if (declaration or (name != null and parser.byte() == '=')) {
+            const target = name orelse return error.InvalidSyntax;
+            if (reserved(target) or !parser.eat('=')) return error.InvalidSyntax;
+            const index = bindings.find(target);
+            if (!declaration and index == null) return error.UnknownIdentifier;
+            const value = try parser.sum(0);
+            _ = parser.peek();
+            if (!parser.eat(';')) return error.InvalidSyntax;
+            if (declaration) {
+                if (index != null) return error.DuplicateBinding;
+                if (bindings.count == bindings.entries.len) return error.LimitExceeded;
+                bindings.entries[bindings.count] = .{ .name = target, .value = value };
+                bindings.count += 1;
+            } else bindings.entries[index.?].value = value;
+            continue;
+        }
+        parser.pos = start;
+        const result = try parser.sum(0);
+        _ = parser.peek();
+        _ = parser.eat(';');
+        if (parser.peek() != null) return error.InvalidSyntax;
+        return result;
+    }
+}
+
+const Bindings = struct {
+    entries: [64]struct { name: []const u8, value: Value } = undefined,
+    count: usize = 0,
+
+    fn find(self: *const Bindings, name: []const u8) ?usize {
+        for (self.entries[0..self.count], 0..) |entry, i| {
+            if (std.mem.eql(u8, entry.name, name)) return i;
+        }
+        return null;
+    }
+};
+
+fn nameStart(c: u8) bool {
+    return std.ascii.isAlphabetic(c) or c == '_' or c == '$';
+}
+
+fn reserved(name: []const u8) bool {
+    var words = std.mem.tokenizeScalar(u8, "await break case catch class const continue debugger default delete do else " ++
+        "enum export extends false finally for function if import in instanceof let new null return super switch " ++
+        "this throw true try typeof var void while with yield implements interface package private protected " ++
+        "public static eval arguments", ' ');
+    while (words.next()) |word| if (std.mem.eql(u8, name, word)) return true;
+    return false;
 }
 
 const Parser = struct {
     source: []const u8,
     pos: usize = 0,
+    bindings: ?*Bindings = null,
+
+    fn identifier(self: *Parser) ?[]const u8 {
+        const start = self.pos;
+        if (!nameStart(self.byte() orelse return null)) return null;
+        self.pos += 1;
+        while (self.byte()) |c| {
+            if (!nameStart(c) and !std.ascii.isDigit(c)) break;
+            self.pos += 1;
+        }
+        return self.source[start..self.pos];
+    }
 
     fn byte(self: *Parser) ?u8 {
         return if (self.pos < self.source.len) self.source[self.pos] else null;
@@ -39,7 +129,27 @@ const Parser = struct {
         return true;
     }
 
-    fn sum(self: *Parser, depth: usize) Error!Value {
+    fn comparison(self: *Parser) ParseError!Value {
+        const lhs = try self.sum(0);
+        const op = self.peek() orelse return error.InvalidSyntax;
+        self.pos += 1;
+        const equal = self.eat('=');
+        if (op == '=' or op == '!') {
+            if (!equal or !self.eat('=')) return error.InvalidSyntax;
+        } else if (op != '<' and op != '>') return error.InvalidSyntax;
+        const rhs = try self.sum(0);
+        const a = lhs.toNumber();
+        const b = rhs.toNumber();
+        return Value.boolean(switch (op) {
+            '<' => if (equal) a <= b else a < b,
+            '>' => if (equal) a >= b else a > b,
+            '=' => lhs.strictEqual(rhs),
+            '!' => !lhs.strictEqual(rhs),
+            else => unreachable,
+        });
+    }
+
+    fn sum(self: *Parser, depth: usize) ParseError!Value {
         var lhs = try self.product(depth);
         while (self.peek()) |op| {
             if (op != '+' and op != '-') break;
@@ -53,7 +163,7 @@ const Parser = struct {
         return lhs;
     }
 
-    fn product(self: *Parser, depth: usize) Error!Value {
+    fn product(self: *Parser, depth: usize) ParseError!Value {
         var lhs = try self.prefix(depth);
         while (self.peek()) |op| {
             if (op != '*' and op != '/') break;
@@ -67,7 +177,7 @@ const Parser = struct {
         return lhs;
     }
 
-    fn prefix(self: *Parser, depth: usize) Error!Value {
+    fn prefix(self: *Parser, depth: usize) ParseError!Value {
         const op = self.peek() orelse return error.InvalidSyntax;
         if (op == '+' or op == '-' or op == '(') {
             // Bound the combined pending parentheses and unary prefixes, even in ReleaseFast.
@@ -81,6 +191,13 @@ const Parser = struct {
             }
             const operand = try self.prefix(depth + 1);
             return if (op == '-') Value.number(-operand.toNumber()) else operand;
+        }
+        if (self.bindings) |bindings| {
+            if (self.identifier()) |name| {
+                if (reserved(name)) return error.InvalidSyntax;
+                const index = bindings.find(name) orelse return error.UnknownIdentifier;
+                return bindings.entries[index].value;
+            }
         }
         return self.literal();
     }

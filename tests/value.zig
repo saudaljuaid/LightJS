@@ -5,6 +5,8 @@ const eq = std.testing.expectEqual;
 
 test {
     _ = @import("expression.zig");
+    _ = @import("comparison.zig");
+    _ = @import("program.zig");
 }
 
 test "numbers retain every non-NaN bit and normalize all NaNs" {
